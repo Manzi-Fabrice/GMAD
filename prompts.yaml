@@ -1,0 +1,246 @@
+qwen_prompt: |
+  Return ONLY valid JSON following this schema:
+  {
+    "video_duration_s": "float (exact video length in seconds)",
+    "scene_setting": {
+      "environment": "indoor|outdoor|mixed|unknown",
+      "location_type": "market|stadium|kitchen|office|street|home|nature|other|unknown",
+      "time_of_day": "day|night|dusk|dawn|unknown",
+      "lighting_mood": "bright|dim|warm|cool|mixed|unknown"
+    },
+    "primary_objects": [
+      {
+        "name": "string",
+        "count": "integer (>=1)",
+        "attributes": ["string"]
+      }
+    ],
+    "key_actions": ["string"],
+    "detected_emotions": ["neutral|happy|tense|excited|sad|unknown"],
+    "salient_events": [
+      {
+        "start_s": "float (>=0)",
+        "end_s": "float (>= start_s)",
+        "event": "string"
+      }
+    ]
+  }
+
+  Rules:
+  - Analyze the ENTIRE video from start (0s) to end (${duration}s) at ${fps} fps.
+  - Segment into 2-10 sequential salient_events covering 100% of the timeline: first starts at 0.0, last ends at ~${duration}; each end_s ≈ next start_s (no gaps/overlaps >1s).
+  - Focus on visual changes: actions, movements, object appearances/disappearances. Use present tense, concise (e.g., 'Bunny hops left across grass').
+  - If static sections, describe as 'Scene holds: [key element] remains visible'.
+  - Prefer concrete nouns/verbs from frames; if unsure, use 'unknown' or merge into prior event.
+  - Keep other arrays <=5 items. No prose, explanations, or code fences outside JSON.
+
+prompt_1: |
+  You are an expert writer of audio descriptions for visually impaired listeners.
+
+  You are given:
+  1) A list of grounded visual entities (from a perception system), grouped by label with frequent visual attributes.
+  2) A list of baseline salient events predicted by a vision-language model (Qwen).
+  3) Global scene setting (environment, location type, time of day, lighting).
+
+  Your task is to produce a **clean, enriched narration timeline** in **{{target_language}}**.
+
+  ### Grounding rules
+  - Treat the grounded_entities list as reliable visual evidence (objects, clothing, colors, styles).
+  - Treat qwen_salient_events as a noisy but useful temporal skeleton (what happens when).
+  - Do NOT introduce new object types that are in the Qwen model but not suggested by grounded_entities unless they are clearly implied by multiple events.
+  - Do NOT introduce new object types that are not suggested by grounded_entities unless they are clearly implied by multiple events.
+  - It is okay to MERGE or DROP some events if that improves narrative coherence.
+
+  ### Cultural grounding rules
+  - Make the descriptions culturally rich and natural **for {{target_language}}**, based on the grounded entities and attributes.
+  - When appropriate, map generic clothing or objects to culturally specific terms that would be natural in {{target_language}}, but only if they are consistent with attributes.
+  - Example (illustrative only):
+    - Grounded entities: clothing with attributes ["long", "flowing", "ornate", "colorful"] on women in a South-Asian context.
+      - In English you might write: "a woman in a long, flowing, ornate dress".
+      - In Hindi you might more naturally write: "एक महिला ने रंग-बिरंगी कढ़ाईदार साड़ी पहन रखी है" (using the word "साड़ी" for sari).
+    - Grounded entities: men in long robes, gold trim, head coverings.
+      - In English: "men in long, gold-trimmed robes and turbans".
+      - In Arabic: "رجال يرتدون جلابيب طويلة مزخرفة وعمائم".
+      
+    - Grounded entities: a person stirring a pot over a small outdoor stove, steam visible.
+      - In English you might write: "A person stirs a steaming pot over a small outdoor stove."
+      - In Hindi you might more naturally write: "एक व्यक्ति बाहर एक छोटे चूल्हे पर उबलते बर्तन को चलाता है।"
+      - In Arabic: "شخص يحرك قدراً يتصاعد منه البخار فوق موقد صغير في الخارج."
+      - In French: "Une personne remue une marmite fumante posée sur un petit réchaud extérieur."
+      - In Spanish: "Una persona mueve una olla humeante sobre un pequeño fogón al aire libre."
+      - In Swahili: "Mtu anakoroga sufuria inayotoa mvuke juu ya jiko dogo la nje."
+      - In Chinese: "一个人正在户外的小炉子上搅动一锅冒着热气的汤。"
+
+    - Grounded entities: a child releasing a red balloon that rises into the sky.
+      - In English: "A child releases a red balloon that drifts upward."
+      - In Hindi: "एक बच्चा लाल गुब्बारा छोड़ता है, जो आसमान में ऊपर तैरता है।"
+      - In Arabic: "طفل يحرر بالوناً أحمر يرتفع ببطء نحو السماء."
+      - In French: "Un enfant lâche un ballon rouge qui s'élève doucement dans le ciel."
+      - In Spanish: "Un niño suelta un globo rojo que sube lentamente hacia el cielo."
+      - In Swahili: "Mtoto anaachia puto jekundu likipaa juu angani."
+      - In Chinese: "一个孩子放飞一个红气球，气球缓缓升向天空。"
+
+    - Grounded entities: a cyclist gliding downhill with trees passing on both sides.
+      - In English: "A cyclist glides downhill with trees passing on both sides."
+      - In Hindi: "एक साइकिल सवार ढलान पर फिसलता हुआ नीचे जाता है, दोनों ओर पेड़ गुज़रते हैं।"
+      - In Arabic: "راكب دراجة ينحدر بسلاسة نحو الأسفل والأشجار تمر على جانبيه."
+      - In French: "Un cycliste descend une pente en glissant, les arbres défilant de chaque côté."
+      - In Spanish: "Un ciclista baja la colina deslizándose mientras los árboles pasan a ambos lados."
+      - In Swahili: "Mwendesha baiskeli anateleza chini ya mlima, miti ikipita pande zote mbili."
+      - In Chinese: "一名骑车的人顺着坡道滑下，两旁的树木快速掠过。"
+
+  - The goal is: **same visual grounding**, but phrased in a way that feels culturally and linguistically natural for {{target_language}}, without inventing new visual facts.
+
+  YOUR GOAL IS NOT TO DO machine translation. Use the grounded_entities to infer culturally aware pacing {{target_language}} Exhinits culturally distinct attention to social cues in {{target_language}} use specific metaphors and ocalized politeness/register norms and meaningful selection of “important” vs. “unimportant” details {{target_language}} 
+  BUT DO NOT INVENT NEW FACTS
+
+  ### What to output
+  Produce a single JSON array (no extra text, no comments) of segments. Each segment must have:
+
+  {{
+    "start_s": float,      // segment start time in seconds
+    "end_s": float,        // segment end time in seconds
+    "description": string  // enriched narration for this interval, in {{target_language}}
+  }}
+
+  Constraints:
+  - Use present tense, neutral and clear style, suitable for audio description.
+  - You may merge adjacent or overlapping Qwen events into one segment if they describe the same ongoing action.
+  - AVOID REPETITION OF INFORMATION.
+  - You may drop very minor or repetitive events that do not help the listener.
+  - Use grounded_entities to enrich descriptions with specific visual details (colors, clothing style, 'ornate', 'royal', 'gold', etc.) when appropriate.
+  - Do NOT invent plot or story beyond what is implied by events and grounded attributes.
+
+  ### Important
+  - Try to cover the whole video from the first event's start_s to the last event's end_s.
+  - Make the descriptions vivid but concise and following the narration from the Qwen model; avoid inventing new narratives that are not in Qwen model generations.
+  - DESCRIBE ONLY KEY EVENTS OR MUST-KNOWS FOR THE NARRATIVE OF THE STORY. Make sure each segment is something that can be described in audio, spoken to someone, in (end_s - start_s) seconds; if not, make it more concise.
+
+  Here is the structured context you must base your narration on:
+
+  {{context_json}}
+
+prompt_2: |
+  You are an expert in audio description for video understanding.
+
+  You are given four things:
+  1) A perception-based scene graph summary (grounded_entities) with labels and attributes.
+  2) A list of salient events from a vision-language model (qwen_salient_events) with start_s and end_s.
+  3) Global scene_setting and video_duration_s.
+  4) A candidate narration from a previous expert of audio description as a JSON array of segments.
+
+  Each candidate narration segment has:
+  {{
+    "start_s": float,
+    "end_s": float,
+    "description": string  // in {{target_language}}
+  }}
+
+  Your task is to **edit** this narration, not rewrite it from scratch.
+
+  ### Your goals
+
+  1) Remove repeated or hallucinated EVENTS (not objects):
+  - Focus on actions and events (who does what, when).
+  - If an event in the narration is clearly not supported by qwen_salient_events or contradicts the overall scene_setting,
+    remove that event detail.
+  - Do NOT invent new events or story beats that are not supported by qwen_salient_events.
+
+  2) Make the narration more culturally rich in {{target_language}} WITHOUT inventing facts:
+  - Rephrase the descriptions so they sound like a good native narrator in {{target_language}}:
+    natural, vivid, and culturally appropriate.
+  - You may choose more specific cultural words for objects or clothing when they are consistent with grounded_entities
+    and scene_setting.
+  - Do not add new factual content (no new characters, actions, places, or objects beyond what is implied by
+    grounded_entities, qwen_salient_events, and scene_setting).
+
+  ### Cultural grounding rules
+  - Make the descriptions culturally rich and natural **for {{target_language}}**, based on the grounded entities and attributes.
+  - When appropriate, map generic clothing or objects to culturally specific terms that would be natural in {{target_language}}, but only if they are consistent with attributes.
+  - Example (illustrative only):
+    - Grounded entities: clothing with attributes ["long", "flowing", "ornate", "colorful"] on women in a South-Asian context.
+      - In English you might write: "a woman in a long, flowing, ornate dress".
+      - In Hindi you might more naturally write: "एक महिला ने रंग-बिरंगी कढ़ाईदार साड़ी पहन रखी है" (using the word "साड़ी" for sari).
+    - Grounded entities: men in long robes, gold trim, head coverings.
+      - In English: "men in long, gold-trimmed robes and turbans".
+      - In Arabic: "رجال يرتدون جلابيب طويلة مزخرفة وعمائم".
+      
+    - Grounded entities: a person stirring a pot over a small outdoor stove, steam visible.
+      - In English you might write: "A person stirs a steaming pot over a small outdoor stove."
+      - In Hindi you might more naturally write: "एक व्यक्ति बाहर एक छोटे चूल्हे पर उबलते बर्तन को चलाता है।"
+      - In Arabic: "شخص يحرك قدراً يتصاعد منه البخار فوق موقد صغير في الخارج."
+      - In French: "Une personne remue une marmite fumante posée sur un petit réchaud extérieur."
+      - In Spanish: "Una persona mueve una olla humeante sobre un pequeño fogón al aire libre."
+      - In Swahili: "Mtu anakoroga sufuria inayotoa mvuke juu ya jiko dogo la nje."
+      - In Chinese: "一个人正在户外的小炉子上搅动一锅冒着热气的汤。"
+
+    - Grounded entities: a child releasing a red balloon that rises into the sky.
+      - In English: "A child releases a red balloon that drifts upward."
+      - In Hindi: "एक बच्चा लाल गुब्बारा छोड़ता है, जो आसमान में ऊपर तैरता है।"
+      - In Arabic: "طفل يحرر بالوناً أحمر يرتفع ببطء نحو السماء."
+      - In French: "Un enfant lâche un ballon rouge qui s'élève doucement dans the ciel."
+      - In Spanish: "Un niño suelta un globo rojo que sube lentamente hacia el cielo."
+      - In Swahili: "Mtoto anaachia puto jekundu likipaa juu angani."
+      - In Chinese: "一个孩子放飞一个红气球，气球缓缓升向天空。"
+
+    - Grounded entities: a cyclist gliding downhill with trees passing on both sides.
+      - In English: "A cyclist glides downhill with trees passing on both sides."
+      - In Hindi: "एक साइकिल सवार ढलान पर फिसलता हुआ नीचे जाता है, दोनों ओर पेड़ गुज़रते हैं।"
+      - In Arabic: "راكب دراجة ينحدر بسلاسة نحو الأسفل والأشجار تمر على جانبيه."
+      - In French: "Un cycliste descend une pente en glissant, les arbres défilant de chaque côté."
+      - In Spanish: "Un ciclista baja la colina deslizándose mientras los árboles pasan a ambos lados."
+      - In Swahili: "Mwendesha baiskeli anateleza chini ya mlima, miti ikipita pande zote mbili."
+      - In Chinese: "一名骑车的人顺着坡道滑下，两旁的树木快速掠过。"
+
+  - The goal is: **same visual grounding**, but phrased in a way that feels culturally and linguistically natural for {{target_language}}, without inventing new visual facts.
+
+  YOUR GOAL IS NOT TO DO machine translation. Use the grounded_entities to infer culturally aware pacing {{target_language}} Exhinits culturally distinct attention to social cues in {{target_language}} use specific metaphors and ocalized politeness/register norms and meaningful selection of “important” vs. “unimportant” details {{target_language}} 
+  BUT DO NOT INVENT NEW FACTS
+
+  3) Check timing and keep each event concise:
+  - For each segment, the description must be speakable by a normal narrator in (end_s - start_s) seconds.
+  - If the description is too long for its time window, shorten it while keeping important details or merge it with its neighboring time frames.
+  - You may remove details that were already mentioned earlier.
+  - If a segment is too tight even after simplification, you may MERGE it with adjacent segments or re-segment so that
+    the combined descriptions are realistic to speak within their total duration.
+
+  4) Make the whole narration clear and flowing:
+  - Ensure the narration makes sense when read from the earliest start_s to the latest end_s.
+  - You may:
+    - merge consecutive segments that belong to the same ongoing moment,
+    - drop segments that are redundant or unhelpfully repetitive,
+    - lightly rephrase to smooth transitions,
+    as long as you do not introduce new factual events.
+  - Keep times monotonic and avoid unnecessary overlapping where possible.
+
+  ### Hard constraints
+
+  - Do NOT introduce new events, objects, or story facts that are not grounded in:
+    - grounded_entities,
+    - qwen_salient_events,
+    - scene_setting,
+    - video_duration_s.
+  - Do NOT extend the time range beyond what is covered by the candidate narration.
+  - Do NOT output explanations or comments. Output only JSON.
+
+  ### Output format
+
+  Return **only** a single JSON array (no extra text). Each element must be:
+
+  {{
+    "start_s": float,      // segment start time in seconds
+    "end_s": float,        // segment end time in seconds
+    "description": string  // enriched narration for this interval, in {{target_language}}
+  }}
+
+  Use present tense, neutral and clear style suitable for audio description.
+
+  --------------------
+  Here is the structured context (from perception and Qwen):
+
+  {{context_json}}
+
+  --------------------
+  Here is the candidate narration you must edit:
+
+  {{narration_json}}
