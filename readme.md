@@ -11,8 +11,6 @@ GMAD demonstrates that accurate multilingual grounded narration does not require
 ## Overview  
 GMAD is a modular pipeline for generating grounded multilingual audio descriptions from raw video. Visual perception is executed entirely through specialized vision models detection tracking and attribute extraction. Narration is produced by text only LLMs ensuring low hallucination and full language flexibility.
 
-Insert pipeline figure here.  
-**(pipeline.png)**  
 ![Pipeline](GMAD-Image.png)
 
 ---
