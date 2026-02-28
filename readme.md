@@ -1,6 +1,5 @@
 # GMAD  
 Grounded Multilingual Audio Description  
-Final Project for COSC 89.30 Topics in Video Understanding (Fall 2025) @ Dartmouth College  
 
 ## Abstract  
 Modern multimodal captioning systems (e.g., GPT-4V, Qwen-VL, LLaVA) inherit systematic biases from English-centric vision encoders such as CLIP, leading to hallucinations and weak grounding. These limitations make them unreliable for applications that require precise and culturally adaptive narration.We propose GMAD, a modular alternative to end-to-end captioning. GMAD replaces monolithic vision–language models with a language-neutral Temporal Scene Graph, constructed from independent detectors, trackers, and attribute models. Narration is generated only after this structured representation is formed, using text-only LLMs directly in the target language.
